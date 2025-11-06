@@ -6,7 +6,7 @@ from matplotlib.animation import FuncAnimation
 
 
 #---- Parameters
-N_BODIES = 25
+N_BODIES = 30
 W, H = 80, 50
 DT = 0.005
 G = 0.075
@@ -15,8 +15,8 @@ TRAIL_LENGTH = 0
 np.random.seed(42)
 VEL = 1.0
 EPS = 2.0
-FF = 10
-SPIN = 0.05
+FF = 20
+SPIN = 0.025
 
 
 # -- Particle class
@@ -62,7 +62,7 @@ def potential_energy(bodies):
     return U
 
 
-# --- Momentum & virial helpers (added)
+# --- Momentum & virial helpers
 def zero_total_momentum(bodies):
     M = sum(b.mass for b in bodies)
     v_cm = sum(b.mass * b.vel for b in bodies) / (M + 1e-12)
@@ -153,7 +153,8 @@ stats_text = ax.text(
     verticalalignment="top", horizontalalignment="left"
 )
 
-scat = ax.scatter([], [], s=[], c=[], alpha=0.9, edgecolors="white")
+# fix: initialize with dummy data to prevent white fallback
+scat = ax.scatter([0], [0], s=[10], c=[[0, 0, 0]], alpha=0.9, edgecolors="white")
 trail_lines = [ax.plot([], [], lw=1, alpha=0.4, color=b.color)[0] for b in bodies]
 
 
@@ -163,22 +164,45 @@ def animate(frame):
     for _ in range(FF):
         update_system(bodies)
 
-    scat.set_offsets([b.pos for b in bodies])
-    scat.set_sizes([b.radius * 1200 for b in bodies])
-    scat.set_facecolors([b.color for b in bodies])
+    # --- Visual updates: color by speed, size by radius ---
+    speeds = np.array([np.linalg.norm(b.vel) for b in bodies])
+    speeds = np.clip(speeds, 1e-3, None)
 
+    # use z-score normalization to preserve contrast even if speeds are similar
+    v_mean = np.mean(speeds)
+    v_std = np.std(speeds)
+    norm = np.clip((speeds - v_mean) / (2*v_std + 1e-9) + 0.5, 0, 1)
+    colors = plt.cm.plasma(norm)
+
+    sizes = np.array([b.radius for b in bodies])**2 * 3000
+
+    scat.set_offsets([b.pos for b in bodies])
+    scat.set_sizes(sizes)
+    scat.set_facecolors(colors)
+
+    # --- Trails (if TRAILS > 0)
     for line, body in zip(trail_lines, bodies):
         trail = np.array(body.trail)
-        line.set_data(trail[:, 0], trail[:, 1])
+        if len(trail) > 1:
+            line.set_data(trail[:, 0], trail[:, 1])
+        else:
+            line.set_data([], [])
 
+    # --- Stats display
     K = kinetic_energy(bodies)
     U = potential_energy(bodies)
     E = K + U
     Q = 2*K / (abs(U) + 1e-12)
 
-    stats_text.set_text(f"Energy: {E: .2f} | Q={Q: .2f}")
+    global E0
+    if 'E0' not in globals() or E0 is None:
+        E0 = E
+    dE_rel = (E - E0) / (abs(E0) + 1e-12) * 100.0
+
+    stats_text.set_text(f"E: {E: .5f}  ΔE: {dE_rel: .3f}%  Q={Q: .3f}")
     stats_text.set_color("limegreen" if E < 0 else "red")
     title.set_text(f"Frame {frame} | Bodies: {len(bodies)}")
+
     return scat, *trail_lines, title, stats_text
 
 
